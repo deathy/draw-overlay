@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Must match the Worker name Cloudflare created from the repo import.
+  "name": "draw-overlay",
+  "compatibility_date": "2025-06-01",
+  // Static-assets-only Worker: no server script, just serve the built site.
+  // SPA fallback so any path returns index.html (handles refresh/deep links).
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

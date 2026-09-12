@@ -1,0 +1,4 @@
+# Keep line endings stable everywhere, so the working copy and CI never
+# disagree about a file's contents (or its hash).
+* text=auto eol=lf
+*.png binary

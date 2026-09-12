@@ -1,0 +1,15 @@
+# Cloudflare static-asset headers. https://developers.cloudflare.com/pages/configuration/headers/
+
+# Everything under /assets/ is content-hashed by the build — a change produces a
+# new filename — so it can be cached permanently and never revalidated.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  # The camera is the one capability this app needs. Everything else — including
+  # the geolocation and microphone a "drawing" app has no business asking for —
+  # is switched off at the header, not merely left unused.
+  Permissions-Policy: camera=(self), geolocation=(), microphone=(), accelerometer=(), gyroscope=(), magnetometer=(), usb=(), payment=(), interest-cohort=()

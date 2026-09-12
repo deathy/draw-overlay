@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    # Bundle minor/patch bumps into a single PR to cut noise; majors stay
+    # separate so breaking changes get individual review.
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
