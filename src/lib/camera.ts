@@ -24,7 +24,41 @@ export interface CameraHandle {
   setTorch(on: boolean): Promise<void>;
   /** Focus at a normalised (0..1) point in the frame. Best-effort. */
   focusAt(xNorm: number, yNorm: number): Promise<void>;
+  /**
+   * Get the preview moving again after the page was hidden. Resolves false when
+   * the stream is beyond saving and the camera has to be reopened.
+   */
+  resume(): Promise<boolean>;
   stop(): void;
+}
+
+/** How long a resumed preview may sit without a new frame before we call it stuck. */
+const RESUME_TIMEOUT_MS = 2000;
+
+/**
+ * Resolve true as soon as the video presents a new frame, false if none arrives
+ * in time or the track ends while we wait. Without requestVideoFrameCallback
+ * (Firefox before 132) there's no reliable stall signal — `currentTime` follows
+ * the stream clock, not frame delivery — so assume the replay worked.
+ */
+function waitForFrame(
+  video: HTMLVideoElement,
+  track: MediaStreamTrack,
+  timeoutMs: number
+): Promise<boolean> {
+  if (typeof video.requestVideoFrameCallback !== 'function') return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (ok: boolean) => {
+      clearTimeout(timer);
+      video.cancelVideoFrameCallback(frame);
+      track.removeEventListener('ended', onEnded);
+      resolve(ok);
+    };
+    const onEnded = () => finish(false);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    const frame = video.requestVideoFrameCallback(() => finish(true));
+    track.addEventListener('ended', onEnded);
+  });
 }
 
 /**
@@ -80,7 +114,13 @@ async function open(extra: MediaTrackConstraints): Promise<MediaStream> {
 
 export async function startCamera(
   video: HTMLVideoElement,
-  preferredDeviceId: string | null
+  preferredDeviceId: string | null,
+  /**
+   * The track ended (the OS took the camera: a call, another app) or came back
+   * from being muted. Either way the preview may need restarting. Not fired by
+   * stop().
+   */
+  onDisrupted?: () => void
 ): Promise<CameraHandle> {
   let stream: MediaStream | null = null;
 
@@ -109,9 +149,22 @@ export async function startCamera(
   video.srcObject = stream;
   video.setAttribute('playsinline', 'true');
   video.muted = true;
-  await video.play();
+  try {
+    await video.play();
+  } catch (err) {
+    // Interrupted (a newer start took the <video>) or refused. Either way this
+    // stream is going nowhere; don't leave the camera running behind it.
+    stream.getTracks().forEach((t) => t.stop());
+    if (video.srcObject === stream) video.srcObject = null;
+    throw err;
+  }
 
   await applyContinuousFocus(track);
+
+  if (onDisrupted) {
+    track.addEventListener('ended', onDisrupted);
+    track.addEventListener('unmute', onDisrupted);
+  }
 
   const hasTorch = Boolean(track.getCapabilities?.().torch);
 
@@ -147,9 +200,27 @@ export async function startCamera(
         /* best-effort */
       }
     },
+    // Mobile browsers pause the <video> and suspend the track while the page is
+    // hidden, and resume neither on return: the app keeps working over a frozen
+    // last frame. Some devices hand the camera back as a live-but-silent track,
+    // so "not ended" isn't enough — only a fresh frame proves the feed is back.
+    async resume() {
+      if (track.readyState === 'ended') return false;
+      try {
+        await video.play();
+      } catch {
+        /* judged by whether frames arrive, below */
+      }
+      return waitForFrame(video, track, RESUME_TIMEOUT_MS);
+    },
     stop() {
+      if (onDisrupted) {
+        track.removeEventListener('ended', onDisrupted);
+        track.removeEventListener('unmute', onDisrupted);
+      }
       stream.getTracks().forEach((t) => t.stop());
-      video.srcObject = null;
+      // A superseded camera being stopped late must not blank its successor.
+      if (video.srcObject === stream) video.srcObject = null;
     }
   };
 }
