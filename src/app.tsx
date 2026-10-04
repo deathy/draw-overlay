@@ -44,15 +44,22 @@ export function App() {
 
   // ---- camera -------------------------------------------------------------
 
+  // The camera's 'ended' handler is bound once per stream, but recovery needs the
+  // latest closures; route it through a ref.
+  const recoverRef = useRef<() => void>(() => {});
+  const recovering = useRef(false);
+
+  /** `quiet` reopens behind the live UI, keeping the picture and its placement. */
   const start = useCallback(
-    async (deviceId: string | null) => {
-      setPhase('starting');
+    async (deviceId: string | null, quiet = false) => {
+      if (!quiet) setPhase('starting');
       setError('');
       try {
         cameraRef.current?.stop();
+        cameraRef.current = null;
         const video = videoRef.current;
         if (!video) throw new Error('no video element');
-        const cam = await startCamera(video, deviceId);
+        const cam = await startCamera(video, deviceId, () => recoverRef.current());
         cameraRef.current = cam;
         setHasTorch(cam.hasTorch);
         setTorchOn(false);
@@ -70,6 +77,32 @@ export function App() {
   );
 
   useEffect(() => () => cameraRef.current?.stop(), []);
+
+  // Switching apps on a phone leaves the preview frozen on its last frame (or
+  // the track ended outright). Coming back must get it moving again.
+  const recover = useCallback(async () => {
+    const cam = cameraRef.current;
+    if (!cam || recovering.current || document.visibilityState !== 'visible') return;
+    recovering.current = true;
+    try {
+      // Re-check identity: the user may have switched cameras meanwhile.
+      if (!(await cam.resume()) && cameraRef.current === cam) {
+        await start(cam.deviceId, true);
+      }
+    } finally {
+      recovering.current = false;
+    }
+  }, [start]);
+  recoverRef.current = () => void recover();
+
+  useEffect(() => {
+    if (phase !== 'live') return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void recover();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [phase, recover]);
 
   // ---- wake lock ----------------------------------------------------------
 
