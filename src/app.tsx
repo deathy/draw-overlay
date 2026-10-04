@@ -8,6 +8,13 @@ import {
   type CameraHandle,
   type CameraOption
 } from './lib/camera';
+import {
+  DEFAULT_TOLERANCE,
+  dominantColors,
+  readPixels,
+  sameColor,
+  type Rgb
+} from './lib/colorKey';
 import { loadSettings, saveSettings, type Settings } from './lib/settings';
 import { autoOrient, IDENTITY, type Size, type Transform } from './lib/transform';
 import { createWakeLock, wakeLockSupported, type WakeLockController } from './lib/wakeLock';
@@ -19,6 +26,15 @@ const QUIET_RETRY_MS = 1000;
 /** More quiet restarts than this within the window means give up and show why. */
 const MAX_QUIET_RESTARTS = 2;
 const RESTART_WINDOW_MS = 10_000;
+/** Swatches only need a glance at the picture. */
+const SWATCH_EDGE = 256;
+/**
+ * Long-edge cap for the keyed picture. Keeps a 48 MP photo to ~50 MB per pixel
+ * buffer. The canvas lands exactly where the <img> did as long as the stage is
+ * no bigger than this in CSS px: every phone, and any desktop short of a
+ * zoomed-out 4K screen.
+ */
+const KEY_EDGE = 4096;
 
 export function App() {
   const [phase, setPhase] = useState<Phase>('intro');
@@ -33,6 +49,13 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [awakeHeld, setAwakeHeld] = useState(false);
+  // Colour removal. Pixels are read only once asked for: a thumbnail for the
+  // swatches when the sheet opens, the full picture when a swatch is picked.
+  const [swatches, setSwatches] = useState<Rgb[] | null>(null);
+  const [keyColor, setKeyColor] = useState<Rgb | null>(null);
+  const [keyTolerance, setKeyTolerance] = useState(DEFAULT_TOLERANCE);
+  const [pixels, setPixels] = useState<ImageData | null>(null);
+  const [keyFailed, setKeyFailed] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraRef = useRef<CameraHandle | null>(null);
@@ -206,6 +229,10 @@ export function App() {
     natural.current = { width: probe.naturalWidth, height: probe.naturalHeight };
     setImageUrl(url);
     setTransform(autoOrient(natural.current, stageSize()));
+    setSwatches(null);
+    setKeyColor(null);
+    setPixels(null);
+    setKeyFailed(false);
     setLocked(false);
     setPanelOpen(false);
   }, []);
@@ -216,6 +243,49 @@ export function App() {
     },
     []
   );
+
+  useEffect(() => {
+    if (!panelOpen || !imageUrl || swatches) return;
+    let current = true;
+    readPixels(imageUrl, SWATCH_EDGE)
+      .then((thumb) => current && setSwatches(dominantColors(thumb)))
+      .catch(() => current && setSwatches([]));
+    return () => {
+      current = false;
+    };
+  }, [panelOpen, imageUrl, swatches]);
+
+  const keyUnavailable = useCallback(() => {
+    setKeyColor(null);
+    setPixels(null);
+    setKeyFailed(true);
+  }, []);
+
+  // Keyed on *whether* a colour is chosen, not which: switching swatches while
+  // the picture is still decoding must not start a second decode.
+  const keying = keyColor !== null;
+  useEffect(() => {
+    if (!keying || !imageUrl || pixels) return;
+    let current = true;
+    readPixels(imageUrl, KEY_EDGE)
+      .then((full) => current && setPixels(full))
+      .catch(() => current && keyUnavailable());
+    return () => {
+      current = false;
+    };
+  }, [keying, imageUrl, pixels, keyUnavailable]);
+
+  const pickKeyColor = (c: Rgb) => {
+    setKeyFailed(false);
+    if (sameColor(keyColor, c)) {
+      // Off: let go of the full-size buffers (~100 MB for a big photo) rather
+      // than hold them in case it comes back on. Phones need the room more.
+      setKeyColor(null);
+      setPixels(null);
+    } else {
+      setKeyColor(c);
+    }
+  };
 
   // Drag-and-drop and paste cost a few lines and make the app usable on a
   // desktop browser, which is where most of the fiddling happens.
@@ -256,6 +326,16 @@ export function App() {
       <Stage
         videoRef={videoRef}
         imageUrl={live ? imageUrl : null}
+        keyed={
+          keyColor && pixels
+            ? {
+                pixels,
+                color: keyColor,
+                tolerance: keyTolerance,
+                onUnavailable: keyUnavailable
+              }
+            : null
+        }
         transform={transform}
         opacity={settings.opacity}
         locked={locked}
@@ -312,7 +392,9 @@ export function App() {
             </p>
             <p class="fine">
               The picture you load is held in this page and dropped when you close it.
-              Nothing is uploaded, stored or measured. The only things kept between visits
+              Opening the placement options reads a small thumbnail of it for the
+              colour swatches, and removing a colour reads the full picture &mdash; both
+              in this tab only. Nothing is uploaded, stored or measured. The only things kept between visits
               are your opacity, camera choice and screen-awake preference, in this
               browser&rsquo;s local storage.
             </p>
@@ -359,6 +441,18 @@ export function App() {
             void start(id);
           }}
           onTransform={setTransform}
+          swatches={swatches}
+          keyColor={keyColor}
+          keyTolerance={keyTolerance}
+          keyNote={
+            keyFailed
+              ? "couldn't process this picture"
+              : keyColor && !pixels
+                ? 'working…'
+                : null
+          }
+          onKeyColor={pickKeyColor}
+          onKeyTolerance={setKeyTolerance}
           onResetPlacement={() => {
             // Against the stage as it is now: the phone may have turned since.
             if (natural.current) setTransform(autoOrient(natural.current, stageSize()));

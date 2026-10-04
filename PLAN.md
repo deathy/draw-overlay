@@ -59,6 +59,7 @@ Two conclusions shaped this repo:
 | Torch | Feature-detected, hidden when absent | Never shipped on iOS and never will be; a dead button is worse than no button |
 | Screen awake | Screen Wake Lock, re-acquired on `visibilitychange` | The phone sits untouched for twenty minutes. A screen timeout throws away the alignment you just set |
 | Picture lifetime | Object URL, memory only, revoked on replace | There is no reason for it to outlive the tab, so it doesn't |
+| Remove colour | Top-5 colour swatches + tolerance, keyed on a `<canvas>` | Backgrounds wash out the paper underneath. A 4096-bucket histogram finds them (the background is nearly always first); picking one swaps the `<img>` for a canvas with that colour cleared and a 32-level feather so outlines stay smooth. Per-pixel distances are computed once per colour, so the tolerance slider only re-runs a table lookup. Capped at 4096 px long edge |
 | Storage | localStorage, three keys | Opacity, camera id, keep-awake. No IndexedDB because there is no data |
 | PWA | `vite-plugin-pwa`, precache everything | No runtime-fetched data at all, so the app is fully offline after first load |
 | Orientation | **Not** locked | Paper is landscape as often as portrait, and the overlay has its own rotation control |
@@ -109,9 +110,11 @@ Notes that matter in practice:
 This repo is meant to be published, and the whole pitch is the contrast with the
 app described above.
 
-- The picture is turned into an object URL and rendered. It is never read into a
-  canvas, never uploaded, never written to storage, and is revoked when replaced or
-  when the tab closes.
+- The picture is turned into an object URL and rendered. It is never uploaded,
+  never written to storage, and is revoked when replaced or when the tab closes.
+- Its pixels are read only for **Remove colour**, and only once asked: a 256 px
+  thumbnail when the placement sheet opens (for the swatches), the full picture
+  when a swatch is picked. In this tab, in memory, dropped with the picture.
 - The camera frames are displayed and discarded. Nothing captures, encodes or
   retains them.
 - No accounts, no analytics, no third-party requests, no fonts or scripts from a

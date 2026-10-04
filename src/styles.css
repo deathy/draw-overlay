@@ -332,3 +332,43 @@ body {
   text-decoration: underline;
   cursor: pointer;
 }
+
+.row-label {
+  margin-right: 4px;
+  font-size: 0.9rem;
+}
+
+/* A colour to make transparent. The accent ring shows which one is (focus gets
+ * its own outline); the inset border keeps white and near-background colours
+ * visible against the sheet. */
+.swatch {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid var(--bg-elev-2);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.swatch.on {
+  border: 3px solid var(--accent);
+}
+
+.swatch:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.range input {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}

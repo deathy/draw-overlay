@@ -1,4 +1,5 @@
 import type { CameraOption } from '../lib/camera';
+import { MAX_TOLERANCE, sameColor, toCssColor, toHex, type Rgb } from '../lib/colorKey';
 import { rotationDegrees, type Transform } from '../lib/transform';
 import { Icon } from './Icon';
 
@@ -24,6 +25,15 @@ interface Props {
   onTransform(next: Transform): void;
   /** Back to the picture's fitted (auto-oriented) placement. */
   onResetPlacement(): void;
+  /** The picture's most common colours; null while they're being worked out. */
+  swatches: Rgb[] | null;
+  keyColor: Rgb | null;
+  keyTolerance: number;
+  /** Status for the colour row: still decoding, or it failed. */
+  keyNote: string | null;
+  /** Pick a colour to make transparent; picking the current one turns it off. */
+  onKeyColor(color: Rgb): void;
+  onKeyTolerance(value: number): void;
   onPanel(open: boolean): void;
   onAbout(): void;
 }
@@ -43,7 +53,11 @@ export function Controls(props: Props) {
     cameras,
     cameraId,
     transform,
-    panelOpen
+    panelOpen,
+    swatches,
+    keyColor,
+    keyTolerance,
+    keyNote
   } = props;
 
   const turn = (by: number) =>
@@ -83,6 +97,44 @@ export function Controls(props: Props) {
             </button>
             <span class="readout">{Math.round(transform.scale * 100)}%</span>
           </div>
+
+          <div class="row" role="group" aria-labelledby="key-label">
+            <span class="row-label" id="key-label">
+              Remove colour
+            </span>
+            {swatches === null && <span class="readout">…</span>}
+            {swatches?.length === 0 && <span class="readout">none found</span>}
+            {swatches?.map((c, i) => {
+              const on = sameColor(c, keyColor);
+              return (
+                <button
+                  key={c.join()}
+                  class={`swatch ${on ? 'on' : ''}`}
+                  style={{ background: toCssColor(c) }}
+                  aria-pressed={on}
+                  aria-label={`Colour ${i + 1} of ${swatches.length} (${toHex(c)})`}
+                  onClick={() => props.onKeyColor(c)}
+                />
+              );
+            })}
+            {keyNote && <span class="readout">{keyNote}</span>}
+          </div>
+
+          {keyColor && (
+            <label class="range">
+              <span>Tolerance</span>
+              <input
+                type="range"
+                min="0"
+                max={MAX_TOLERANCE}
+                value={keyTolerance}
+                aria-label="Colour tolerance"
+                onInput={(e) =>
+                  props.onKeyTolerance(Number((e.currentTarget as HTMLInputElement).value))
+                }
+              />
+            </label>
+          )}
 
           <label class="toggle">
             <span>
