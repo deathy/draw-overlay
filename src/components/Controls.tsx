@@ -1,5 +1,5 @@
 import type { CameraOption } from '../lib/camera';
-import { IDENTITY, rotationDegrees, type Transform } from '../lib/transform';
+import { rotationDegrees, type Transform } from '../lib/transform';
 import { Icon } from './Icon';
 
 interface Props {
@@ -22,6 +22,8 @@ interface Props {
   onToggleKeepAwake(): void;
   onCamera(id: string): void;
   onTransform(next: Transform): void;
+  /** Back to the picture's fitted (auto-oriented) placement. */
+  onResetPlacement(): void;
   onPanel(open: boolean): void;
   onAbout(): void;
 }
@@ -76,7 +78,7 @@ export function Controls(props: Props) {
             >
               <Icon name="mirror" size={18} /> Mirror
             </button>
-            <button class="chip" onClick={() => props.onTransform(IDENTITY)}>
+            <button class="chip" onClick={props.onResetPlacement}>
               <Icon name="reset" size={18} /> Reset placement
             </button>
             <span class="readout">{Math.round(transform.scale * 100)}%</span>

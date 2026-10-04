@@ -62,6 +62,7 @@ Two conclusions shaped this repo:
 | Storage | localStorage, three keys | Opacity, camera id, keep-awake. No IndexedDB because there is no data |
 | PWA | `vite-plugin-pwa`, precache everything | No runtime-fetched data at all, so the app is fully offline after first load |
 | Orientation | **Not** locked | Paper is landscape as often as portrait, and the overlay has its own rotation control |
+| Picture orientation | Auto quarter-turn on load when it disagrees with the screen | A landscape photo on an upright phone is otherwise a thin strip. Done once per picture (and on Reset), never on later device rotation, so a deliberate placement is never undone. EXIF is already applied by the browser |
 | Deploy | Cloudflare static-assets Worker | Same as sibling projects; SPA fallback |
 | License | Apache-2.0 | Intended open-source |
 
