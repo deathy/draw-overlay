@@ -338,11 +338,12 @@ body {
   font-size: 0.9rem;
 }
 
-/* A colour to make transparent. The ring shows which one is; the inset border
- * keeps white and near-background colours visible against the sheet. */
+/* A colour to make transparent. The accent ring shows which one is (focus gets
+ * its own outline); the inset border keeps white and near-background colours
+ * visible against the sheet. */
 .swatch {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 2px solid var(--bg-elev-2);
   border-radius: 50%;
@@ -351,8 +352,12 @@ body {
 }
 
 .swatch.on {
-  border-color: var(--bg);
-  outline: 2px solid var(--accent);
+  border: 3px solid var(--accent);
+}
+
+.swatch:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 .range {

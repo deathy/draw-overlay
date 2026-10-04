@@ -14,7 +14,12 @@ interface Props {
   videoRef: { current: HTMLVideoElement | null };
   imageUrl: string | null;
   /** When set, the picture is drawn with this colour made transparent. */
-  keyed: { pixels: ImageData; color: Rgb; tolerance: number } | null;
+  keyed: {
+    pixels: ImageData;
+    color: Rgb;
+    tolerance: number;
+    onUnavailable(): void;
+  } | null;
   transform: Transform;
   opacity: number;
   locked: boolean;

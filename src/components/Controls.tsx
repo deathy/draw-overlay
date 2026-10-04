@@ -1,5 +1,5 @@
 import type { CameraOption } from '../lib/camera';
-import { MAX_TOLERANCE, sameColor, toCssColor, type Rgb } from '../lib/colorKey';
+import { MAX_TOLERANCE, sameColor, toCssColor, toHex, type Rgb } from '../lib/colorKey';
 import { IDENTITY, rotationDegrees, type Transform } from '../lib/transform';
 import { Icon } from './Icon';
 
@@ -27,6 +27,8 @@ interface Props {
   swatches: Rgb[] | null;
   keyColor: Rgb | null;
   keyTolerance: number;
+  /** Status for the colour row: still decoding, or it failed. */
+  keyNote: string | null;
   /** Pick a colour to make transparent; picking the current one turns it off. */
   onKeyColor(color: Rgb): void;
   onKeyTolerance(value: number): void;
@@ -52,7 +54,8 @@ export function Controls(props: Props) {
     panelOpen,
     swatches,
     keyColor,
-    keyTolerance
+    keyTolerance,
+    keyNote
   } = props;
 
   const turn = (by: number) =>
@@ -93,11 +96,13 @@ export function Controls(props: Props) {
             <span class="readout">{Math.round(transform.scale * 100)}%</span>
           </div>
 
-          <div class="row">
-            <span class="row-label">Remove colour</span>
+          <div class="row" role="group" aria-labelledby="key-label">
+            <span class="row-label" id="key-label">
+              Remove colour
+            </span>
             {swatches === null && <span class="readout">…</span>}
             {swatches?.length === 0 && <span class="readout">none found</span>}
-            {swatches?.map((c) => {
+            {swatches?.map((c, i) => {
               const on = sameColor(c, keyColor);
               return (
                 <button
@@ -105,11 +110,12 @@ export function Controls(props: Props) {
                   class={`swatch ${on ? 'on' : ''}`}
                   style={{ background: toCssColor(c) }}
                   aria-pressed={on}
-                  aria-label={`Make ${toCssColor(c)} transparent`}
+                  aria-label={`Colour ${i + 1} of ${swatches.length} (${toHex(c)})`}
                   onClick={() => props.onKeyColor(c)}
                 />
               );
             })}
+            {keyNote && <span class="readout">{keyNote}</span>}
           </div>
 
           {keyColor && (

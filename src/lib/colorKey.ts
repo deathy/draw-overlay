@@ -39,6 +39,10 @@ export function toCssColor(c: Rgb): string {
   return `rgb(${c[0]} ${c[1]} ${c[2]})`;
 }
 
+export function toHex(c: Rgb): string {
+  return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
 /**
  * The picture's most common colours, most common first. A coarse histogram
  * groups JPEG noise and gentle gradients into one bucket; each swatch is the
@@ -120,7 +124,8 @@ export function applyKey(
     opaque[d] = Math.round(255 * keep[d]) << 24;
   }
   // Whole pixels at a time. RGBA bytes read as one little-endian word put alpha
-  // in the top byte; every platform a browser runs on is little-endian.
+  // in the top byte; every platform a browser runs on is little-endian. Needs
+  // 4-byte-aligned arrays: ImageData always is, a stray subarray might not be.
   const s32 = new Uint32Array(src.buffer, src.byteOffset, distances.length);
   const d32 = new Uint32Array(dst.buffer, dst.byteOffset, distances.length);
   for (let p = 0; p < s32.length; p++) {
@@ -148,5 +153,9 @@ export async function readPixels(url: string, maxEdge: number): Promise<ImageDat
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('no 2d context');
   ctx.drawImage(img, 0, 0, w, h);
-  return ctx.getImageData(0, 0, w, h);
+  const pixels = ctx.getImageData(0, 0, w, h);
+  // Release the backing store now; iOS counts it against a small canvas budget
+  // until it's garbage collected.
+  canvas.width = canvas.height = 0;
+  return pixels;
 }

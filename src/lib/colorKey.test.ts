@@ -5,6 +5,7 @@ import {
   FEATHER,
   keyDistances,
   sameColor,
+  toHex,
   type Pixels,
   type Rgb
 } from './colorKey';
@@ -99,7 +100,7 @@ describe('applyKey', () => {
   it('fades linearly across the feather band', () => {
     // Pure blue channel offset: distance equals the offset exactly.
     const half = 40 + FEATHER / 2;
-    expect(alphaAt([255, 255, 255 - half], 40)).toBe(128); // 127.5, rounded by the clamped array
+    expect(alphaAt([255, 255, 255 - half], 40)).toBe(128); // 255 * 0.5, rounded in the lookup table
   });
 
   it('keeps existing transparency', () => {
@@ -118,6 +119,12 @@ describe('keyDistances', () => {
       [[0, 0, 0], 1]
     ]);
     expect(Array.from(keyDistances(px.data, [255, 255, 255]))).toEqual([0, 30, 255]);
+  });
+});
+
+describe('toHex', () => {
+  it('formats as a 6-digit hex colour', () => {
+    expect(toHex([255, 8, 0])).toBe('#ff0800');
   });
 });
 

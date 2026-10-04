@@ -25,8 +25,9 @@ type Phase = 'intro' | 'starting' | 'live' | 'error';
 const SWATCH_EDGE = 256;
 /**
  * Long-edge cap for the keyed picture. Keeps a 48 MP photo to ~50 MB per pixel
- * buffer while staying above any screen's CSS width, so the canvas fits exactly
- * where the <img> did.
+ * buffer. The canvas lands exactly where the <img> did as long as the stage is
+ * no bigger than this in CSS px: every phone, and any desktop short of a
+ * zoomed-out 4K screen.
  */
 const KEY_EDGE = 4096;
 
@@ -49,6 +50,7 @@ export function App() {
   const [keyColor, setKeyColor] = useState<Rgb | null>(null);
   const [keyTolerance, setKeyTolerance] = useState(DEFAULT_TOLERANCE);
   const [pixels, setPixels] = useState<ImageData | null>(null);
+  const [keyFailed, setKeyFailed] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraRef = useRef<CameraHandle | null>(null);
@@ -119,6 +121,7 @@ export function App() {
     setSwatches(null);
     setKeyColor(null);
     setPixels(null);
+    setKeyFailed(false);
     setLocked(false);
     setPanelOpen(false);
   }, []);
@@ -141,16 +144,37 @@ export function App() {
     };
   }, [panelOpen, imageUrl, swatches]);
 
+  const keyUnavailable = useCallback(() => {
+    setKeyColor(null);
+    setPixels(null);
+    setKeyFailed(true);
+  }, []);
+
+  // Keyed on *whether* a colour is chosen, not which: switching swatches while
+  // the picture is still decoding must not start a second decode.
+  const keying = keyColor !== null;
   useEffect(() => {
-    if (!keyColor || !imageUrl || pixels) return;
+    if (!keying || !imageUrl || pixels) return;
     let current = true;
     readPixels(imageUrl, KEY_EDGE)
       .then((full) => current && setPixels(full))
-      .catch(() => current && setKeyColor(null));
+      .catch(() => current && keyUnavailable());
     return () => {
       current = false;
     };
-  }, [keyColor, imageUrl, pixels]);
+  }, [keying, imageUrl, pixels, keyUnavailable]);
+
+  const pickKeyColor = (c: Rgb) => {
+    setKeyFailed(false);
+    if (sameColor(keyColor, c)) {
+      // Off: let go of the full-size buffers (~100 MB for a big photo) rather
+      // than hold them in case it comes back on. Phones need the room more.
+      setKeyColor(null);
+      setPixels(null);
+    } else {
+      setKeyColor(c);
+    }
+  };
 
   // Drag-and-drop and paste cost a few lines and make the app usable on a
   // desktop browser, which is where most of the fiddling happens.
@@ -192,7 +216,14 @@ export function App() {
         videoRef={videoRef}
         imageUrl={live ? imageUrl : null}
         keyed={
-          keyColor && pixels ? { pixels, color: keyColor, tolerance: keyTolerance } : null
+          keyColor && pixels
+            ? {
+                pixels,
+                color: keyColor,
+                tolerance: keyTolerance,
+                onUnavailable: keyUnavailable
+              }
+            : null
         }
         transform={transform}
         opacity={settings.opacity}
@@ -250,8 +281,9 @@ export function App() {
             </p>
             <p class="fine">
               The picture you load is held in this page and dropped when you close it.
-              Removing a colour reads its pixels, in this tab only. Nothing is uploaded,
-              stored or measured. The only things kept between visits
+              Opening the placement options reads a small thumbnail of it for the
+              colour swatches, and removing a colour reads the full picture &mdash; both
+              in this tab only. Nothing is uploaded, stored or measured. The only things kept between visits
               are your opacity, camera choice and screen-awake preference, in this
               browser&rsquo;s local storage.
             </p>
@@ -301,7 +333,14 @@ export function App() {
           swatches={swatches}
           keyColor={keyColor}
           keyTolerance={keyTolerance}
-          onKeyColor={(c) => setKeyColor((prev) => (sameColor(prev, c) ? null : c))}
+          keyNote={
+            keyFailed
+              ? "couldn't process this picture"
+              : keyColor && !pixels
+                ? 'working…'
+                : null
+          }
+          onKeyColor={pickKeyColor}
           onKeyTolerance={setKeyTolerance}
           onPanel={setPanelOpen}
           onAbout={() => {
