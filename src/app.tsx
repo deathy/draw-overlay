@@ -20,9 +20,6 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [transform, setTransform] = useState<Transform>(IDENTITY);
-  // This picture's "fitted" placement — what Reset returns to. Usually identity;
-  // a quarter turn when the picture's orientation disagrees with the screen's.
-  const [fit, setFit] = useState<Transform>(IDENTITY);
   const [locked, setLocked] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
@@ -36,9 +33,11 @@ export function App() {
   const wakeRef = useRef<WakeLockController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const objectUrl = useRef<string | null>(null);
-  // Orient once per picture, on its first load. The <img> remounts whenever the
-  // camera restarts, and that must not throw away a placement the user set.
-  const needsFit = useRef(false);
+  // The stage fills .app (`inset: 0`), so this is also the stage's size.
+  const appRef = useRef<HTMLDivElement | null>(null);
+  /** The current picture's natural (EXIF-oriented) size, for re-fitting on Reset. */
+  const natural = useRef<Size | null>(null);
+  const pickGen = useRef(0);
 
   const patch = useCallback((next: Partial<Settings>) => {
     setSettings((prev) => {
@@ -94,14 +93,35 @@ export function App() {
 
   // ---- the picture --------------------------------------------------------
 
-  const useImageFile = useCallback((file: File | null | undefined) => {
+  const stageSize = (): Size => ({
+    width: appRef.current?.clientWidth ?? 0,
+    height: appRef.current?.clientHeight ?? 0
+  });
+
+  // Measure before showing. The starting placement depends on the picture's
+  // size, and applying it once the <img> is up would flash the unturned picture
+  // and lose to a drag begun in between.
+  const useImageFile = useCallback(async (file: File | null | undefined) => {
     if (!file || !file.type.startsWith('image/')) return;
+    const gen = ++pickGen.current;
+    const url = URL.createObjectURL(file);
+    const probe = new Image();
+    probe.src = url;
+    try {
+      await probe.decode();
+    } catch {
+      URL.revokeObjectURL(url); // not a picture this browser can show
+      return;
+    }
+    if (gen !== pickGen.current) {
+      URL.revokeObjectURL(url); // a newer pick overtook this one
+      return;
+    }
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-    objectUrl.current = URL.createObjectURL(file);
-    setImageUrl(objectUrl.current);
-    setTransform(IDENTITY);
-    setFit(IDENTITY);
-    needsFit.current = true;
+    objectUrl.current = url;
+    natural.current = { width: probe.naturalWidth, height: probe.naturalHeight };
+    setImageUrl(url);
+    setTransform(autoOrient(natural.current, stageSize()));
     setLocked(false);
     setPanelOpen(false);
   }, []);
@@ -118,14 +138,14 @@ export function App() {
   useEffect(() => {
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
-      useImageFile(e.dataTransfer?.files?.[0]);
+      void useImageFile(e.dataTransfer?.files?.[0]);
     };
     const onDragOver = (e: DragEvent) => e.preventDefault();
     const onPaste = (e: ClipboardEvent) => {
       const item = Array.from(e.clipboardData?.items ?? []).find((i) =>
         i.type.startsWith('image/')
       );
-      if (item) useImageFile(item.getAsFile());
+      if (item) void useImageFile(item.getAsFile());
     };
     window.addEventListener('drop', onDrop);
     window.addEventListener('dragover', onDragOver);
@@ -136,14 +156,6 @@ export function App() {
       window.removeEventListener('paste', onPaste);
     };
   }, [useImageFile]);
-
-  const onImageLoad = useCallback((natural: Size, stage: Size) => {
-    if (!needsFit.current) return;
-    needsFit.current = false;
-    const t = autoOrient(natural, stage);
-    setFit(t);
-    setTransform(t);
-  }, []);
 
   // ---- render -------------------------------------------------------------
 
@@ -156,7 +168,7 @@ export function App() {
   const live = phase === 'live';
 
   return (
-    <div class="app">
+    <div class="app" ref={appRef}>
       <Stage
         videoRef={videoRef}
         imageUrl={live ? imageUrl : null}
@@ -165,7 +177,6 @@ export function App() {
         locked={locked}
         onTransform={setTransform}
         onTapFocus={(x, y) => void cameraRef.current?.focusAt(x, y)}
-        onImageLoad={onImageLoad}
       />
 
       {phase !== 'live' && (
@@ -264,7 +275,10 @@ export function App() {
             void start(id);
           }}
           onTransform={setTransform}
-          onResetPlacement={() => setTransform(fit)}
+          onResetPlacement={() => {
+            // Against the stage as it is now: the phone may have turned since.
+            if (natural.current) setTransform(autoOrient(natural.current, stageSize()));
+          }}
           onPanel={setPanelOpen}
           onAbout={() => {
             setPanelOpen(false);
@@ -280,7 +294,7 @@ export function App() {
         accept="image/*"
         onChange={(e) => {
           const input = e.currentTarget as HTMLInputElement;
-          useImageFile(input.files?.[0]);
+          void useImageFile(input.files?.[0]);
           // Reset so re-picking the same file fires a change event again.
           input.value = '';
         }}

@@ -223,6 +223,18 @@ describe('autoOrient', () => {
     expect(t.scale).toBeCloseTo(2, 12);
   });
 
+  it('is limited by the stage width when the turned picture is wide enough', () => {
+    // Fit: 3000x2000 -> 400x266.7. Turned: 266.7 across 400 allows 1.5x; 400
+    // down 800 would allow 2x.
+    expect(autoOrient({ width: 3000, height: 2000 }, phone).scale).toBeCloseTo(1.5, 12);
+  });
+
+  it('caps a shrunk picture at its natural size once turned', () => {
+    // Fit: 600x200 -> 400x133.3 (2/3). Turned, the stage would allow 2x, but
+    // 1.5x already shows it at natural size.
+    expect(autoOrient({ width: 600, height: 200 }, phone).scale).toBeCloseTo(1.5, 12);
+  });
+
   it('never enlarges a small picture past its natural size', () => {
     // 300x100 isn't shrunk at identity; turned, it fits as-is.
     expect(autoOrient({ width: 300, height: 100 }, phone).scale).toBeCloseTo(1, 12);

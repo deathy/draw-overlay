@@ -5,7 +5,6 @@ import {
   toCss,
   type Grip,
   type Point,
-  type Size,
   type Transform
 } from '../lib/transform';
 
@@ -17,8 +16,6 @@ interface Props {
   locked: boolean;
   onTransform(next: Transform): void;
   onTapFocus(xNorm: number, yNorm: number): void;
-  /** The picture decoded: its displayed size, and the stage it sits in. */
-  onImageLoad(natural: Size, stage: Size): void;
 }
 
 /** How far a pointer may wander and still count as a tap rather than a drag. */
@@ -39,8 +36,7 @@ export function Stage({
   opacity,
   locked,
   onTransform,
-  onTapFocus,
-  onImageLoad
+  onTapFocus
 }: Props) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const pointers = useRef(new Map<number, Point>());
@@ -160,15 +156,6 @@ export function Stage({
           src={imageUrl}
           alt=""
           draggable={false}
-          onLoad={(e) => {
-            const img = e.currentTarget as HTMLImageElement;
-            const stage = stageRef.current;
-            if (!stage) return;
-            onImageLoad(
-              { width: img.naturalWidth, height: img.naturalHeight },
-              { width: stage.clientWidth, height: stage.clientHeight }
-            );
-          }}
           style={{ transform: toCss(transform), opacity }}
         />
       )}

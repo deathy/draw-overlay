@@ -162,8 +162,8 @@ function orientation({ width, height }: Size): 'portrait' | 'landscape' | 'squar
  * The starting placement for a freshly loaded picture: fitted and centred, and
  * turned a quarter clockwise when its orientation disagrees with the stage's — a
  * landscape photo on an upright phone would otherwise be a thin strip across the
- * middle. `natural` is the picture's size as displayed (browsers apply EXIF
- * orientation to naturalWidth/Height already).
+ * middle. `natural` is the picture's natural size, EXIF-oriented (browsers
+ * apply EXIF orientation to naturalWidth/Height already).
  *
  * The scale is relative to the identity fit, which the layout computes for the
  * *unrotated* picture and never enlarges past natural size; the turned picture
