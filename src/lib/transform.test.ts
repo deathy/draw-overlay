@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyGesture,
+  autoOrient,
   clampScale,
   gestureDelta,
   IDENTITY,
@@ -180,5 +181,50 @@ describe('toCss', () => {
   it('appends the mirror only when set', () => {
     expect(toCss({ ...IDENTITY, mirrored: true })).toContain('scaleX(-1)');
     expect(toCss(IDENTITY)).not.toContain('scaleX');
+  });
+});
+
+describe('autoOrient', () => {
+  const phone = { width: 400, height: 800 };
+
+  it('leaves a picture alone when orientations already agree', () => {
+    expect(autoOrient({ width: 1000, height: 2000 }, phone)).toEqual(IDENTITY);
+    expect(autoOrient({ width: 3000, height: 2000 }, { width: 800, height: 400 })).toEqual(
+      IDENTITY
+    );
+  });
+
+  it('ignores near-square pictures and stages', () => {
+    expect(autoOrient({ width: 1020, height: 1000 }, phone)).toEqual(IDENTITY);
+    expect(autoOrient({ width: 3000, height: 1000 }, { width: 600, height: 620 })).toEqual(
+      IDENTITY
+    );
+  });
+
+  it('turns a landscape picture a quarter and fills an upright stage', () => {
+    // Identity fit: 4000x2000 shrinks to 400x200. Turned, 200 across 400 and 400
+    // down 800 — so double it, and both edges meet the stage.
+    const t = autoOrient({ width: 4000, height: 2000 }, phone);
+    expect(t.rotation).toBeCloseTo(Math.PI / 2, 12);
+    expect(t.scale).toBeCloseTo(2, 12);
+    expect(t).toMatchObject({ x: 0, y: 0, mirrored: false });
+  });
+
+  it('is limited by whichever stage edge the turned picture reaches first', () => {
+    // Fit: 3000x1000 -> 400x133.3. Turned it needs 133.3 across, 400 down: the
+    // 800px height allows 2x, the 400px width allows 3x.
+    expect(autoOrient({ width: 3000, height: 1000 }, phone).scale).toBeCloseTo(2, 12);
+  });
+
+  it('turns a portrait picture on a landscape stage', () => {
+    const t = autoOrient({ width: 1000, height: 2000 }, { width: 800, height: 400 });
+    expect(t.rotation).toBeCloseTo(Math.PI / 2, 12);
+    // Fit: 200x400. Turned: 400 across 800, 200 down 400 -> 2x.
+    expect(t.scale).toBeCloseTo(2, 12);
+  });
+
+  it('never enlarges a small picture past its natural size', () => {
+    // 300x100 isn't shrunk at identity; turned, it fits as-is.
+    expect(autoOrient({ width: 300, height: 100 }, phone).scale).toBeCloseTo(1, 12);
   });
 });

@@ -9,7 +9,7 @@ import {
   type CameraOption
 } from './lib/camera';
 import { loadSettings, saveSettings, type Settings } from './lib/settings';
-import { IDENTITY, type Transform } from './lib/transform';
+import { autoOrient, IDENTITY, type Size, type Transform } from './lib/transform';
 import { createWakeLock, wakeLockSupported, type WakeLockController } from './lib/wakeLock';
 
 type Phase = 'intro' | 'starting' | 'live' | 'error';
@@ -20,6 +20,9 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [transform, setTransform] = useState<Transform>(IDENTITY);
+  // This picture's "fitted" placement — what Reset returns to. Usually identity;
+  // a quarter turn when the picture's orientation disagrees with the screen's.
+  const [fit, setFit] = useState<Transform>(IDENTITY);
   const [locked, setLocked] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
@@ -33,6 +36,9 @@ export function App() {
   const wakeRef = useRef<WakeLockController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const objectUrl = useRef<string | null>(null);
+  // Orient once per picture, on its first load. The <img> remounts whenever the
+  // camera restarts, and that must not throw away a placement the user set.
+  const needsFit = useRef(false);
 
   const patch = useCallback((next: Partial<Settings>) => {
     setSettings((prev) => {
@@ -94,6 +100,8 @@ export function App() {
     objectUrl.current = URL.createObjectURL(file);
     setImageUrl(objectUrl.current);
     setTransform(IDENTITY);
+    setFit(IDENTITY);
+    needsFit.current = true;
     setLocked(false);
     setPanelOpen(false);
   }, []);
@@ -129,6 +137,14 @@ export function App() {
     };
   }, [useImageFile]);
 
+  const onImageLoad = useCallback((natural: Size, stage: Size) => {
+    if (!needsFit.current) return;
+    needsFit.current = false;
+    const t = autoOrient(natural, stage);
+    setFit(t);
+    setTransform(t);
+  }, []);
+
   // ---- render -------------------------------------------------------------
 
   const toggleTorch = () => {
@@ -149,6 +165,7 @@ export function App() {
         locked={locked}
         onTransform={setTransform}
         onTapFocus={(x, y) => void cameraRef.current?.focusAt(x, y)}
+        onImageLoad={onImageLoad}
       />
 
       {phase !== 'live' && (
@@ -247,6 +264,7 @@ export function App() {
             void start(id);
           }}
           onTransform={setTransform}
+          onResetPlacement={() => setTransform(fit)}
           onPanel={setPanelOpen}
           onAbout={() => {
             setPanelOpen(false);
