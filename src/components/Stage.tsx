@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'preact/hooks';
+import type { Rgb } from '../lib/colorKey';
 import {
   applyGesture,
   gestureDelta,
@@ -7,10 +8,13 @@ import {
   type Point,
   type Transform
 } from '../lib/transform';
+import { KeyedOverlay } from './KeyedOverlay';
 
 interface Props {
   videoRef: { current: HTMLVideoElement | null };
   imageUrl: string | null;
+  /** When set, the picture is drawn with this colour made transparent. */
+  keyed: { pixels: ImageData; color: Rgb; tolerance: number } | null;
   transform: Transform;
   opacity: number;
   locked: boolean;
@@ -32,6 +36,7 @@ interface ActiveGesture {
 export function Stage({
   videoRef,
   imageUrl,
+  keyed,
   transform,
   opacity,
   locked,
@@ -150,7 +155,10 @@ export function Stage({
       onPointerCancel={locked ? undefined : endPointer}
     >
       <video class="feed" ref={videoRef} playsInline muted autoPlay />
-      {imageUrl && (
+      {imageUrl && keyed && (
+        <KeyedOverlay {...keyed} style={{ transform: toCss(transform), opacity }} />
+      )}
+      {imageUrl && !keyed && (
         <img
           class="overlay"
           src={imageUrl}

@@ -8,11 +8,27 @@ import {
   type CameraHandle,
   type CameraOption
 } from './lib/camera';
+import {
+  DEFAULT_TOLERANCE,
+  dominantColors,
+  readPixels,
+  sameColor,
+  type Rgb
+} from './lib/colorKey';
 import { loadSettings, saveSettings, type Settings } from './lib/settings';
 import { IDENTITY, type Transform } from './lib/transform';
 import { createWakeLock, wakeLockSupported, type WakeLockController } from './lib/wakeLock';
 
 type Phase = 'intro' | 'starting' | 'live' | 'error';
+
+/** Swatches only need a glance at the picture. */
+const SWATCH_EDGE = 256;
+/**
+ * Long-edge cap for the keyed picture. Keeps a 48 MP photo to ~50 MB per pixel
+ * buffer while staying above any screen's CSS width, so the canvas fits exactly
+ * where the <img> did.
+ */
+const KEY_EDGE = 4096;
 
 export function App() {
   const [phase, setPhase] = useState<Phase>('intro');
@@ -27,6 +43,12 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [awakeHeld, setAwakeHeld] = useState(false);
+  // Colour removal. Pixels are read only once asked for: a thumbnail for the
+  // swatches when the sheet opens, the full picture when a swatch is picked.
+  const [swatches, setSwatches] = useState<Rgb[] | null>(null);
+  const [keyColor, setKeyColor] = useState<Rgb | null>(null);
+  const [keyTolerance, setKeyTolerance] = useState(DEFAULT_TOLERANCE);
+  const [pixels, setPixels] = useState<ImageData | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraRef = useRef<CameraHandle | null>(null);
@@ -94,6 +116,9 @@ export function App() {
     objectUrl.current = URL.createObjectURL(file);
     setImageUrl(objectUrl.current);
     setTransform(IDENTITY);
+    setSwatches(null);
+    setKeyColor(null);
+    setPixels(null);
     setLocked(false);
     setPanelOpen(false);
   }, []);
@@ -104,6 +129,28 @@ export function App() {
     },
     []
   );
+
+  useEffect(() => {
+    if (!panelOpen || !imageUrl || swatches) return;
+    let current = true;
+    readPixels(imageUrl, SWATCH_EDGE)
+      .then((thumb) => current && setSwatches(dominantColors(thumb)))
+      .catch(() => current && setSwatches([]));
+    return () => {
+      current = false;
+    };
+  }, [panelOpen, imageUrl, swatches]);
+
+  useEffect(() => {
+    if (!keyColor || !imageUrl || pixels) return;
+    let current = true;
+    readPixels(imageUrl, KEY_EDGE)
+      .then((full) => current && setPixels(full))
+      .catch(() => current && setKeyColor(null));
+    return () => {
+      current = false;
+    };
+  }, [keyColor, imageUrl, pixels]);
 
   // Drag-and-drop and paste cost a few lines and make the app usable on a
   // desktop browser, which is where most of the fiddling happens.
@@ -144,6 +191,9 @@ export function App() {
       <Stage
         videoRef={videoRef}
         imageUrl={live ? imageUrl : null}
+        keyed={
+          keyColor && pixels ? { pixels, color: keyColor, tolerance: keyTolerance } : null
+        }
         transform={transform}
         opacity={settings.opacity}
         locked={locked}
@@ -200,7 +250,8 @@ export function App() {
             </p>
             <p class="fine">
               The picture you load is held in this page and dropped when you close it.
-              Nothing is uploaded, stored or measured. The only things kept between visits
+              Removing a colour reads its pixels, in this tab only. Nothing is uploaded,
+              stored or measured. The only things kept between visits
               are your opacity, camera choice and screen-awake preference, in this
               browser&rsquo;s local storage.
             </p>
@@ -247,6 +298,11 @@ export function App() {
             void start(id);
           }}
           onTransform={setTransform}
+          swatches={swatches}
+          keyColor={keyColor}
+          keyTolerance={keyTolerance}
+          onKeyColor={(c) => setKeyColor((prev) => (sameColor(prev, c) ? null : c))}
+          onKeyTolerance={setKeyTolerance}
           onPanel={setPanelOpen}
           onAbout={() => {
             setPanelOpen(false);
