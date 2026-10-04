@@ -143,3 +143,40 @@ export function toCss(t: Transform): string {
   if (t.mirrored) parts.push('scaleX(-1)');
   return parts.join(' ');
 }
+
+export interface Size {
+  width: number;
+  height: number;
+}
+
+/** Within this ratio of square, a shape has no orientation worth matching. */
+const SQUARE_TOLERANCE = 1.05;
+
+function orientation({ width, height }: Size): 'portrait' | 'landscape' | 'square' {
+  if (width > height * SQUARE_TOLERANCE) return 'landscape';
+  if (height > width * SQUARE_TOLERANCE) return 'portrait';
+  return 'square';
+}
+
+/**
+ * The starting placement for a freshly loaded picture: fitted and centred, and
+ * turned a quarter clockwise when its orientation disagrees with the stage's — a
+ * landscape photo on an upright phone would otherwise be a thin strip across the
+ * middle. `natural` is the picture's natural size, EXIF-oriented (browsers
+ * apply EXIF orientation to naturalWidth/Height already).
+ *
+ * The scale is relative to the identity fit, which the layout computes for the
+ * *unrotated* picture and never enlarges past natural size; the turned picture
+ * keeps that same never-enlarge rule.
+ */
+export function autoOrient(natural: Size, stage: Size): Transform {
+  const pic = orientation(natural);
+  const view = orientation(stage);
+  if (pic === 'square' || view === 'square' || pic === view) return IDENTITY;
+  const fit = Math.min(1, stage.width / natural.width, stage.height / natural.height);
+  const shownW = natural.width * fit;
+  const shownH = natural.height * fit;
+  // Turned, the picture's height runs across the stage and its width down it.
+  const scale = Math.min(stage.width / shownH, stage.height / shownW, 1 / fit);
+  return { ...IDENTITY, scale: clampScale(scale), rotation: Math.PI / 2 };
+}

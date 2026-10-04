@@ -63,6 +63,7 @@ Two conclusions shaped this repo:
 | Storage | localStorage, three keys | Opacity, camera id, keep-awake. No IndexedDB because there is no data |
 | PWA | `vite-plugin-pwa`, precache everything | No runtime-fetched data at all, so the app is fully offline after first load |
 | Orientation | **Not** locked | Paper is landscape as often as portrait, and the overlay has its own rotation control |
+| Picture orientation | Auto quarter-turn on load when it disagrees with the screen | A landscape photo on an upright phone is otherwise a thin strip. Done once per picture (and on Reset), never on later device rotation, so a deliberate placement is never undone. EXIF is already applied by the browser |
 | Deploy | Cloudflare static-assets Worker | Same as sibling projects; SPA fallback |
 | License | Apache-2.0 | Intended open-source |
 
@@ -95,6 +96,12 @@ Notes that matter in practice:
   barcode that meant failed scans; for paper at 30 cm it means the app looks
   permanently broken. Hence: enumerate, prefer the lowest-indexed rear camera,
   request continuous autofocus, offer a picker, and remember the choice.
+- **The preview does not survive the page being hidden.** Switching apps pauses
+  the `<video>` and suspends (or, on some devices, ends) the camera track, and
+  neither comes back on its own: the UI works over a frozen last frame. On
+  `visibilitychange` the app replays the video and waits for a fresh frame; an
+  ended track or no frame within 2 s means the camera is reopened quietly, keeping
+  the picture and its placement.
 - **Torch is an Android-only feature of the web platform.** WebKit has never
   implemented it and all iOS browsers are WebKit, so this is not a "someday".
 

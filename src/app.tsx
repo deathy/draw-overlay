@@ -16,11 +16,16 @@ import {
   type Rgb
 } from './lib/colorKey';
 import { loadSettings, saveSettings, type Settings } from './lib/settings';
-import { IDENTITY, type Transform } from './lib/transform';
+import { autoOrient, IDENTITY, type Size, type Transform } from './lib/transform';
 import { createWakeLock, wakeLockSupported, type WakeLockController } from './lib/wakeLock';
 
 type Phase = 'intro' | 'starting' | 'live' | 'error';
 
+/** Pause before a failed quiet restart tries once more. */
+const QUIET_RETRY_MS = 1000;
+/** More quiet restarts than this within the window means give up and show why. */
+const MAX_QUIET_RESTARTS = 2;
+const RESTART_WINDOW_MS = 10_000;
 /** Swatches only need a glance at the picture. */
 const SWATCH_EDGE = 256;
 /**
@@ -57,6 +62,11 @@ export function App() {
   const wakeRef = useRef<WakeLockController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const objectUrl = useRef<string | null>(null);
+  // The stage fills .app (`inset: 0`), so this is also the stage's size.
+  const appRef = useRef<HTMLDivElement | null>(null);
+  /** The current picture's natural (EXIF-oriented) size, for re-fitting on Reset. */
+  const natural = useRef<Size | null>(null);
+  const pickGen = useRef(0);
 
   const patch = useCallback((next: Partial<Settings>) => {
     setSettings((prev) => {
@@ -68,24 +78,66 @@ export function App() {
 
   // ---- camera -------------------------------------------------------------
 
+  // start() is defined before recover() and each needs the other; the track
+  // listeners bound inside start() reach recover() through this ref.
+  const recoverRef = useRef<() => void>(() => {});
+  const recovering = useRef(false);
+  // Bumped by every start(). A start that finds it has moved on was superseded —
+  // the user picked another camera while a quiet restart was still opening — and
+  // backs out instead of leaking its stream or clobbering the newer one.
+  const startGen = useRef(0);
+  const torchWanted = useRef(false);
+  torchWanted.current = torchOn;
+  // When recent quiet restarts happened, so a camera that keeps dying can't loop.
+  const quietRestarts = useRef<number[]>([]);
+
+  /** `quiet` reopens behind the live UI, keeping the picture, placement and torch. */
   const start = useCallback(
-    async (deviceId: string | null) => {
-      setPhase('starting');
+    async (deviceId: string | null, quiet = false) => {
+      const gen = ++startGen.current;
+      const stale = () => gen !== startGen.current;
+      const keepTorch = quiet && torchWanted.current;
+      if (!quiet) {
+        setPhase('starting');
+        quietRestarts.current = []; // a fresh start by the user gets a fresh budget
+      }
       setError('');
+      cameraRef.current?.stop();
+      cameraRef.current = null;
       try {
-        cameraRef.current?.stop();
         const video = videoRef.current;
         if (!video) throw new Error('no video element');
-        const cam = await startCamera(video, deviceId);
+        const open = () => startCamera(video, deviceId, () => recoverRef.current());
+        let cam: CameraHandle;
+        try {
+          cam = await open();
+        } catch (err) {
+          // Coming back from an app that is still letting go of the camera fails
+          // fast. One short wait usually clears it — worth it before the curtain.
+          if (!quiet || stale()) throw err;
+          await new Promise((r) => setTimeout(r, QUIET_RETRY_MS));
+          if (stale()) return;
+          cam = await open();
+        }
+        if (stale()) {
+          cam.stop();
+          return;
+        }
         cameraRef.current = cam;
         setHasTorch(cam.hasTorch);
-        setTorchOn(false);
         setCameras(cam.devices);
+        const torch = keepTorch && cam.hasTorch;
+        setTorchOn(torch);
+        if (torch) void cam.setTorch(true);
         // Persist what we actually got, not what we asked for — the auto-picked
-        // main rear lens is the thing worth remembering.
-        if (cam.deviceId && cam.deviceId !== deviceId) patch({ cameraId: cam.deviceId });
+        // main rear lens is the thing worth remembering. Not on a quiet restart,
+        // though: a fallback lens opened behind the user's back isn't their pick.
+        if (!quiet && cam.deviceId && cam.deviceId !== deviceId) {
+          patch({ cameraId: cam.deviceId });
+        }
         setPhase('live');
       } catch (err) {
+        if (stale()) return;
         setError(describeCameraError(err));
         setPhase('error');
       }
@@ -94,6 +146,42 @@ export function App() {
   );
 
   useEffect(() => () => cameraRef.current?.stop(), []);
+
+  // Switching apps on a phone leaves the preview frozen on its last frame (or
+  // the track ended outright). Coming back must get it moving again.
+  const recover = useCallback(async () => {
+    const cam = cameraRef.current;
+    if (!cam || recovering.current || document.visibilityState !== 'visible') return;
+    recovering.current = true;
+    try {
+      // Re-check identity: the user may have switched cameras meanwhile.
+      if ((await cam.resume()) || cameraRef.current !== cam) return;
+      const now = Date.now();
+      const recent = quietRestarts.current.filter((t) => now - t < RESTART_WINDOW_MS);
+      quietRestarts.current = [...recent, now];
+      if (recent.length >= MAX_QUIET_RESTARTS) {
+        // Something keeps taking the camera back. Stop fighting it and say so.
+        cam.stop();
+        cameraRef.current = null;
+        setError(describeCameraError({ name: 'NotReadableError' }));
+        setPhase('error');
+        return;
+      }
+      await start(cam.deviceId, true);
+    } finally {
+      recovering.current = false;
+    }
+  }, [start]);
+  recoverRef.current = () => void recover();
+
+  useEffect(() => {
+    if (phase !== 'live') return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void recover();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [phase, recover]);
 
   // ---- wake lock ----------------------------------------------------------
 
@@ -112,12 +200,35 @@ export function App() {
 
   // ---- the picture --------------------------------------------------------
 
-  const useImageFile = useCallback((file: File | null | undefined) => {
+  const stageSize = (): Size => ({
+    width: appRef.current?.clientWidth ?? 0,
+    height: appRef.current?.clientHeight ?? 0
+  });
+
+  // Measure before showing. The starting placement depends on the picture's
+  // size, and applying it once the <img> is up would flash the unturned picture
+  // and lose to a drag begun in between.
+  const useImageFile = useCallback(async (file: File | null | undefined) => {
     if (!file || !file.type.startsWith('image/')) return;
+    const gen = ++pickGen.current;
+    const url = URL.createObjectURL(file);
+    const probe = new Image();
+    probe.src = url;
+    try {
+      await probe.decode();
+    } catch {
+      URL.revokeObjectURL(url); // not a picture this browser can show
+      return;
+    }
+    if (gen !== pickGen.current) {
+      URL.revokeObjectURL(url); // a newer pick overtook this one
+      return;
+    }
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-    objectUrl.current = URL.createObjectURL(file);
-    setImageUrl(objectUrl.current);
-    setTransform(IDENTITY);
+    objectUrl.current = url;
+    natural.current = { width: probe.naturalWidth, height: probe.naturalHeight };
+    setImageUrl(url);
+    setTransform(autoOrient(natural.current, stageSize()));
     setSwatches(null);
     setKeyColor(null);
     setPixels(null);
@@ -181,14 +292,14 @@ export function App() {
   useEffect(() => {
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
-      useImageFile(e.dataTransfer?.files?.[0]);
+      void useImageFile(e.dataTransfer?.files?.[0]);
     };
     const onDragOver = (e: DragEvent) => e.preventDefault();
     const onPaste = (e: ClipboardEvent) => {
       const item = Array.from(e.clipboardData?.items ?? []).find((i) =>
         i.type.startsWith('image/')
       );
-      if (item) useImageFile(item.getAsFile());
+      if (item) void useImageFile(item.getAsFile());
     };
     window.addEventListener('drop', onDrop);
     window.addEventListener('dragover', onDragOver);
@@ -211,7 +322,7 @@ export function App() {
   const live = phase === 'live';
 
   return (
-    <div class="app">
+    <div class="app" ref={appRef}>
       <Stage
         videoRef={videoRef}
         imageUrl={live ? imageUrl : null}
@@ -342,6 +453,10 @@ export function App() {
           }
           onKeyColor={pickKeyColor}
           onKeyTolerance={setKeyTolerance}
+          onResetPlacement={() => {
+            // Against the stage as it is now: the phone may have turned since.
+            if (natural.current) setTransform(autoOrient(natural.current, stageSize()));
+          }}
           onPanel={setPanelOpen}
           onAbout={() => {
             setPanelOpen(false);
@@ -357,7 +472,7 @@ export function App() {
         accept="image/*"
         onChange={(e) => {
           const input = e.currentTarget as HTMLInputElement;
-          useImageFile(input.files?.[0]);
+          void useImageFile(input.files?.[0]);
           // Reset so re-picking the same file fires a change event again.
           input.value = '';
         }}
