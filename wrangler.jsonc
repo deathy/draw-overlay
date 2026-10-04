@@ -8,5 +8,8 @@
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"
-  }
+  },
+  // Required for per-branch preview builds (`wrangler preview`). Empty is enough:
+  // assets and compatibility settings above apply to previews too.
+  "previews": {}
 }
