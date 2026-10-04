@@ -14,6 +14,12 @@ import { createWakeLock, wakeLockSupported, type WakeLockController } from './li
 
 type Phase = 'intro' | 'starting' | 'live' | 'error';
 
+/** Pause before a failed quiet restart tries once more. */
+const QUIET_RETRY_MS = 1000;
+/** More quiet restarts than this within the window means give up and show why. */
+const MAX_QUIET_RESTARTS = 2;
+const RESTART_WINDOW_MS = 10_000;
+
 export function App() {
   const [phase, setPhase] = useState<Phase>('intro');
   const [error, setError] = useState('');
@@ -44,24 +50,66 @@ export function App() {
 
   // ---- camera -------------------------------------------------------------
 
+  // start() is defined before recover() and each needs the other; the track
+  // listeners bound inside start() reach recover() through this ref.
+  const recoverRef = useRef<() => void>(() => {});
+  const recovering = useRef(false);
+  // Bumped by every start(). A start that finds it has moved on was superseded —
+  // the user picked another camera while a quiet restart was still opening — and
+  // backs out instead of leaking its stream or clobbering the newer one.
+  const startGen = useRef(0);
+  const torchWanted = useRef(false);
+  torchWanted.current = torchOn;
+  // When recent quiet restarts happened, so a camera that keeps dying can't loop.
+  const quietRestarts = useRef<number[]>([]);
+
+  /** `quiet` reopens behind the live UI, keeping the picture, placement and torch. */
   const start = useCallback(
-    async (deviceId: string | null) => {
-      setPhase('starting');
+    async (deviceId: string | null, quiet = false) => {
+      const gen = ++startGen.current;
+      const stale = () => gen !== startGen.current;
+      const keepTorch = quiet && torchWanted.current;
+      if (!quiet) {
+        setPhase('starting');
+        quietRestarts.current = []; // a fresh start by the user gets a fresh budget
+      }
       setError('');
+      cameraRef.current?.stop();
+      cameraRef.current = null;
       try {
-        cameraRef.current?.stop();
         const video = videoRef.current;
         if (!video) throw new Error('no video element');
-        const cam = await startCamera(video, deviceId);
+        const open = () => startCamera(video, deviceId, () => recoverRef.current());
+        let cam: CameraHandle;
+        try {
+          cam = await open();
+        } catch (err) {
+          // Coming back from an app that is still letting go of the camera fails
+          // fast. One short wait usually clears it — worth it before the curtain.
+          if (!quiet || stale()) throw err;
+          await new Promise((r) => setTimeout(r, QUIET_RETRY_MS));
+          if (stale()) return;
+          cam = await open();
+        }
+        if (stale()) {
+          cam.stop();
+          return;
+        }
         cameraRef.current = cam;
         setHasTorch(cam.hasTorch);
-        setTorchOn(false);
         setCameras(cam.devices);
+        const torch = keepTorch && cam.hasTorch;
+        setTorchOn(torch);
+        if (torch) void cam.setTorch(true);
         // Persist what we actually got, not what we asked for — the auto-picked
-        // main rear lens is the thing worth remembering.
-        if (cam.deviceId && cam.deviceId !== deviceId) patch({ cameraId: cam.deviceId });
+        // main rear lens is the thing worth remembering. Not on a quiet restart,
+        // though: a fallback lens opened behind the user's back isn't their pick.
+        if (!quiet && cam.deviceId && cam.deviceId !== deviceId) {
+          patch({ cameraId: cam.deviceId });
+        }
         setPhase('live');
       } catch (err) {
+        if (stale()) return;
         setError(describeCameraError(err));
         setPhase('error');
       }
@@ -70,6 +118,42 @@ export function App() {
   );
 
   useEffect(() => () => cameraRef.current?.stop(), []);
+
+  // Switching apps on a phone leaves the preview frozen on its last frame (or
+  // the track ended outright). Coming back must get it moving again.
+  const recover = useCallback(async () => {
+    const cam = cameraRef.current;
+    if (!cam || recovering.current || document.visibilityState !== 'visible') return;
+    recovering.current = true;
+    try {
+      // Re-check identity: the user may have switched cameras meanwhile.
+      if ((await cam.resume()) || cameraRef.current !== cam) return;
+      const now = Date.now();
+      const recent = quietRestarts.current.filter((t) => now - t < RESTART_WINDOW_MS);
+      quietRestarts.current = [...recent, now];
+      if (recent.length >= MAX_QUIET_RESTARTS) {
+        // Something keeps taking the camera back. Stop fighting it and say so.
+        cam.stop();
+        cameraRef.current = null;
+        setError(describeCameraError({ name: 'NotReadableError' }));
+        setPhase('error');
+        return;
+      }
+      await start(cam.deviceId, true);
+    } finally {
+      recovering.current = false;
+    }
+  }, [start]);
+  recoverRef.current = () => void recover();
+
+  useEffect(() => {
+    if (phase !== 'live') return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void recover();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [phase, recover]);
 
   // ---- wake lock ----------------------------------------------------------
 

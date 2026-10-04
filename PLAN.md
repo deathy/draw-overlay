@@ -94,6 +94,12 @@ Notes that matter in practice:
   barcode that meant failed scans; for paper at 30 cm it means the app looks
   permanently broken. Hence: enumerate, prefer the lowest-indexed rear camera,
   request continuous autofocus, offer a picker, and remember the choice.
+- **The preview does not survive the page being hidden.** Switching apps pauses
+  the `<video>` and suspends (or, on some devices, ends) the camera track, and
+  neither comes back on its own: the UI works over a frozen last frame. On
+  `visibilitychange` the app replays the video and waits for a fresh frame; an
+  ended track or no frame within 2 s means the camera is reopened quietly, keeping
+  the picture and its placement.
 - **Torch is an Android-only feature of the web platform.** WebKit has never
   implemented it and all iOS browsers are WebKit, so this is not a "someday".
 
