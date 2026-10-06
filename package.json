@@ -33,7 +33,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "preact": "10.29.2"
+    "preact": "11.0.0"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.6",
