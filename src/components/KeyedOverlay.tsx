@@ -25,7 +25,12 @@ export function KeyedOverlay({ pixels, color, tolerance, style, onUnavailable }:
   const drawn = useRef<{ distances: Uint8Array; tolerance: number } | null>(null);
 
   const draw = (tol: number) => {
-    const ctx = canvasRef.current?.getContext('2d');
+    const canvas = canvasRef.current;
+    // Unmounted with a redraw still queued: Preact 11 runs effect cleanups after
+    // paint, so the frame below isn't always cancelled before it fires. There is
+    // nothing left to draw on, and that is not the canvas being refused.
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) {
       onUnavailable();
       return;
