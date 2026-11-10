@@ -33,14 +33,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "preact": "11.0.2"
+    "preact": "11.2.0"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.6",
     "sharp": "0.35.5",
     "typescript": "7.0.2",
-    "vite": "8.3.5",
+    "vite": "8.3.6",
     "vite-plugin-pwa": "2.0.0",
-    "vitest": "5.0.5"
+    "vitest": "5.1.0"
   }
 }
